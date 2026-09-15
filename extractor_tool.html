@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>أداة استخراج صور Excel</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --bg:#11151c; --panel:#171d27; --panel2:#1d2430; --border:#2a3241;
+    --text:#e7ebf1; --muted:#8b96a5; --accent:#e2a53b; --accent-dim:#7a5b1e;
+    --ok:#4caf7d; --err:#e0645a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Tahoma,Arial,sans-serif;min-height:100vh}
+  .wrap{max-width:1100px;margin:0 auto;padding:28px 20px 60px}
+  h1{font-size:22px;margin:0 0 4px;font-weight:700}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 24px}
+
+  .dropzone{
+    border:2px dashed var(--border);border-radius:14px;padding:40px 20px;
+    text-align:center;background:var(--panel);cursor:pointer;transition:border-color .15s, background .15s;
+  }
+  .dropzone.drag{border-color:var(--accent);background:var(--panel2)}
+  .dropzone .icon{font-size:34px;margin-bottom:10px}
+  .dropzone .main{font-size:15px;margin-bottom:4px}
+  .dropzone .hint{font-size:12px;color:var(--muted)}
+  input[type=file]{display:none}
+
+  .status{margin-top:16px;font-size:13px;color:var(--muted);min-height:18px}
+  .status.err{color:var(--err)}
+  .progress{height:6px;border-radius:3px;background:var(--border);overflow:hidden;margin-top:8px;display:none}
+  .progress.show{display:block}
+  .progress > div{height:100%;background:var(--accent);width:0%;transition:width .2s}
+
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-top:20px;display:none}
+  .panel.show{display:block}
+  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .summary{font-size:14px;color:var(--text)}
+  .summary b{color:var(--accent)}
+  .controls{display:flex;gap:10px;flex-wrap:wrap}
+
+  select, button{
+    font-family:inherit;font-size:13px;padding:9px 14px;border-radius:9px;border:1px solid var(--border);
+    background:var(--panel2);color:var(--text);cursor:pointer;
+  }
+  select:hover, button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#1a1305;font-weight:700}
+  button.primary:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+
+  input[type=text].search{
+    width:100%;padding:10px 14px;border-radius:9px;border:1px solid var(--border);
+    background:var(--panel2);color:var(--text);font-size:14px;margin-bottom:14px
+  }
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+  .card{background:var(--panel2);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+  .thumb{width:100%;aspect-ratio:1/1;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .thumb img{max-width:100%;max-height:100%;object-fit:contain}
+  .thumb .noPreview{color:#999;font-size:11px;text-align:center;padding:6px}
+  .info{padding:8px 10px}
+  .code{font-weight:700;font-size:12px;color:var(--accent)}
+  .name{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4;max-height:2.8em;overflow:hidden}
+
+  .warn-box{background:#2a2110;border:1px solid var(--accent-dim);color:#e8c98a;border-radius:9px;padding:10px 14px;font-size:12px;margin-bottom:14px}
+  .empty{padding:50px;text-align:center;color:var(--muted)}
+  footer{color:var(--muted);font-size:11px;text-align:center;margin-top:30px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>أداة استخراج صور Excel</h1>
+  <p class="sub">ارفع ملف إكسل (xlsx) يحتوي على صور داخل الخلايا، وستقوم الأداة باستخراج كل الصور وربطها بأرقام الأصناف تلقائيًا — كل المعالجة تتم داخل متصفحك فقط، دون رفع أي بيانات لأي خادم.</p>
+
+  <div class="dropzone" id="dropzone">
+    <div class="icon">⇪</div>
+    <div class="main">اسحب ملف Excel هنا أو اضغط للاختيار</div>
+    <div class="hint">صيغة .xlsx فقط</div>
+    <input type="file" id="fileInput" accept=".xlsx">
+  </div>
+  <div class="status" id="status"></div>
+  <div class="progress" id="progress"><div id="progressBar"></div></div>
+
+  <div class="panel" id="panel">
+    <div id="warnBox"></div>
+    <div class="row">
+      <div class="summary" id="summary"></div>
+      <div class="controls">
+        <select id="sheetSelect" title="الورقة"></select>
+        <select id="colSelect" title="عمود التسمية"></select>
+        <button id="downloadZip" class="primary">تنزيل كل الصور (ZIP)</button>
+        <button id="downloadCsv">تنزيل جدول الربط (CSV)</button>
+      </div>
+    </div>
+    <input type="text" class="search" id="search" placeholder="ابحث برقم الصنف أو الاسم...">
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="emptyMsg" style="display:none">لا توجد نتائج مطابقة</div>
+  </div>
+
+  <footer>تعمل الأداة بالكامل محليًا داخل المتصفح — لا يتم إرسال الملف أو الصور إلى أي خادم أو خدمة خارجية.</footer>
+</div>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const statusEl = document.getElementById('status');
+const progressWrap = document.getElementById('progress');
+const progressBar = document.getElementById('progressBar');
+const panel = document.getElementById('panel');
+const summaryEl = document.getElementById('summary');
+const warnBox = document.getElementById('warnBox');
+const sheetSelect = document.getElementById('sheetSelect');
+const colSelect = document.getElementById('colSelect');
+const grid = document.getElementById('grid');
+const searchEl = document.getElementById('search');
+const emptyMsg = document.getElementById('emptyMsg');
+const downloadZipBtn = document.getElementById('downloadZip');
+const downloadCsvBtn = document.getElementById('downloadCsv');
+
+let workbookState = null; // { sheets: [{name, items:[{row, cells:{A:'x',...}, images:[{rid, blob, ext}]}], headers:{A:'..'}}] }
+let currentBlobUrls = [];
+let currentSheetData = null; // {headers, items: [{row, cells, imageBlob, ext, previewUrl}]}
+
+function setStatus(msg, isErr){
+  statusEl.textContent = msg || '';
+  statusEl.className = 'status' + (isErr ? ' err' : '');
+}
+function setProgress(pct){
+  if(pct === null){ progressWrap.classList.remove('show'); return; }
+  progressWrap.classList.add('show');
+  progressBar.style.width = pct + '%';
+}
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+  if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => {
+  if(e.target.files.length) handleFile(e.target.files[0]);
+});
+
+function colLetterToIndex(letters){
+  let n = 0;
+  for(const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1; // 0-based
+}
+function colIndexToLetter(idx){
+  let n = idx + 1, s = '';
+  while(n > 0){
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+function parseCellRef(ref){
+  const m = ref.match(/^([A-Z]+)(\d+)$/);
+  return m ? { col: m[1], row: parseInt(m[2], 10) } : null;
+}
+function sanitizeName(name){
+  name = (name === undefined || name === null) ? '' : String(name).trim();
+  name = name.replace(/[\\\/*?:"<>|]/g, '_').replace(/\s+/g, ' ');
+  return name.slice(0, 80);
+}
+function extFromPath(path){
+  const m = path.match(/\.([a-zA-Z0-9]+)$/);
+  return m ? m[1].toLowerCase() : 'png';
+}
+function mimeFromExt(ext){
+  if(ext === 'png') return 'image/png';
+  if(ext === 'gif') return 'image/gif';
+  if(ext === 'bmp') return 'image/bmp';
+  if(ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  return 'application/octet-stream';
+}
+function resolvePath(basePath, relPath){
+  // basePath: e.g. "xl/worksheets/sheet1.xml" ; relPath: "../drawings/drawing1.xml"
+  const baseDir = basePath.split('/').slice(0, -1);
+  const parts = relPath.split('/');
+  for(const p of parts){
+    if(p === '..') baseDir.pop();
+    else if(p === '.') continue;
+    else baseDir.push(p);
+  }
+  return baseDir.join('/');
+}
+
+async function readXml(zip, path){
+  const f = zip.file(path);
+  if(!f) return null;
+  const text = await f.async('text');
+  return new DOMParser().parseFromString(text, 'application/xml');
+}
+function readRels(xmlDoc){
+  const map = {};
+  if(!xmlDoc) return map;
+  xmlDoc.querySelectorAll('Relationship').forEach(r => {
+    map[r.getAttribute('Id')] = { target: r.getAttribute('Target'), type: r.getAttribute('Type') };
+  });
+  return map;
+}
+
+async function handleFile(file){
+  if(!file.name.toLowerCase().endsWith('.xlsx')){
+    setStatus('الرجاء رفع ملف بصيغة .xlsx', true);
+    return;
+  }
+  panel.classList.remove('show');
+  revokeUrls();
+  setStatus('جاري قراءة الملف...');
+  setProgress(5);
+  try{
+    const buf = await file.arrayBuffer();
+    setProgress(15);
+    const zip = await JSZip.loadAsync(buf);
+    setProgress(25);
+
+    // 1) workbook.xml + rels -> قائمة الأوراق
+    const wbXml = await readXml(zip, 'xl/workbook.xml');
+    const wbRelsXml = await readXml(zip, 'xl/_rels/workbook.xml.rels');
+    const wbRels = readRels(wbRelsXml);
+    if(!wbXml) throw new Error('ملف الإكسل غير صالح (لا يوجد workbook.xml)');
+
+    const sheetsMeta = [];
+    wbXml.querySelectorAll('sheets > sheet').forEach(s => {
+      const rid = s.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') ||
+                  s.getAttribute('r:id');
+      const rel = wbRels[rid];
+      if(rel){
+        sheetsMeta.push({ name: s.getAttribute('name'), path: resolvePath('xl/workbook.xml', rel.target) });
+      }
+    });
+    setProgress(35);
+
+    // 2) sharedStrings
+    let sharedStrings = [];
+    const ssXml = await readXml(zip, 'xl/sharedStrings.xml');
+    if(ssXml){
+      ssXml.querySelectorAll('si').forEach(si => {
+        const texts = [];
+        si.querySelectorAll('t').forEach(t => texts.push(t.textContent));
+        sharedStrings.push(texts.join(''));
+      });
+    }
+    setProgress(45);
+
+    // 3) لكل ورقة: تحقق من وجود drawing مرتبط بها
+    const sheetsWithImages = [];
+    for(const sm of sheetsMeta){
+      const relsPath = resolvePath(sm.path, '_rels/' + sm.path.split('/').pop() + '.rels');
+      const sheetRelsXml = await readXml(zip, relsPath);
+      const sheetRels = readRels(sheetRelsXml);
+      const drawingRelKey = Object.keys(sheetRels).find(k => sheetRels[k].type && sheetRels[k].type.includes('drawing'));
+      if(!drawingRelKey) continue;
+      const drawingPath = resolvePath(sm.path, sheetRels[drawingRelKey].target);
+
+      const drawingXml = await readXml(zip, drawingPath);
+      if(!drawingXml) continue;
+      const drawingRelsPath = resolvePath(drawingPath, '_rels/' + drawingPath.split('/').pop() + '.rels');
+      const drawingRelsXml = await readXml(zip, drawingRelsPath);
+      const drawingRels = readRels(drawingRelsXml);
+
+      // أنكرز الصور (يدعم twoCellAnchor و oneCellAnchor)
+      const anchors = [];
+      drawingXml.querySelectorAll('twoCellAnchor, oneCellAnchor').forEach(anchor => {
+        const from = anchor.querySelector('from');
+        if(!from) return;
+        const rowEl = from.querySelector('row');
+        const colEl = from.querySelector('col');
+        const blip = anchor.querySelector('blipFill blip, pic blipFill blip');
+        if(!rowEl || !blip) return;
+        const embed = blip.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed') ||
+                      blip.getAttribute('r:embed');
+        if(!embed) return;
+        anchors.push({
+          row0: parseInt(rowEl.textContent, 10),
+          col0: colEl ? parseInt(colEl.textContent, 10) : 0,
+          rid: embed
+        });
+      });
+      if(anchors.length === 0) continue;
+
+      // بيانات الصفوف من ملف الشيت
+      const sheetXml = await readXml(zip, sm.path);
+      const rowData = {}; // rowNum -> {colLetter: value}
+      sheetXml.querySelectorAll('row').forEach(rowEl => {
+        const rowNum = parseInt(rowEl.getAttribute('r'), 10);
+        const cells = {};
+        rowEl.querySelectorAll('c').forEach(c => {
+          const ref = c.getAttribute('r');
+          const parsed = ref ? parseCellRef(ref) : null;
+          if(!parsed) return;
+          const type = c.getAttribute('t');
+          let value = '';
+          if(type === 's'){
+            const vEl = c.querySelector('v');
+            const idx = vEl ? parseInt(vEl.textContent, 10) : -1;
+            value = sharedStrings[idx] !== undefined ? sharedStrings[idx] : '';
+          } else if(type === 'inlineStr'){
+            const tEl = c.querySelector('is t');
+            value = tEl ? tEl.textContent : '';
+          } else {
+            const vEl = c.querySelector('v');
+            value = vEl ? vEl.textContent : '';
+          }
+          cells[parsed.col] = value;
+        });
+        rowData[rowNum] = cells;
+      });
+
+      // رأس الأعمدة (الصف الأول)
+      const headerRow = rowData[1] || {};
+
+      sheetsWithImages.push({
+        name: sm.name,
+        headerRow,
+        rowData,
+        anchors,
+        drawingRels
+      });
+    }
+    setProgress(60);
+
+    if(sheetsWithImages.length === 0){
+      throw new Error('لم يتم العثور على أي صور مضمّنة داخل خلايا هذا الملف.');
+    }
+
+    // تحميل بيانات الصور (blob) لكل شيت
+    for(const sh of sheetsWithImages){
+      sh.images = [];
+      for(const a of sh.anchors){
+        const rel = sh.drawingRels[a.rid];
+        if(!rel) continue;
+        const imgPath = resolvePath('xl/drawings/x.xml', rel.target);
+        const imgFile = zip.file(imgPath);
+        if(!imgFile) continue;
+        const ext = extFromPath(imgPath);
+        const blob = await imgFile.async('blob');
+        sh.images.push({ row: a.row0 + 1, ext, blob, mime: mimeFromExt(ext) });
+      }
+    }
+    setProgress(85);
+
+    workbookState = { sheets: sheetsWithImages };
+    populateSheetSelect();
+    setProgress(100);
+    setStatus('تم الاستخراج بنجاح ✓');
+    setTimeout(() => setProgress(null), 600);
+    panel.classList.add('show');
+
+  }catch(err){
+    console.error(err);
+    setProgress(null);
+    setStatus('خطأ: ' + err.message, true);
+  }
+}
+
+function populateSheetSelect(){
+  sheetSelect.innerHTML = '';
+  workbookState.sheets.forEach((sh, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = sh.name + ' (' + sh.images.length + ' صورة)';
+    sheetSelect.appendChild(opt);
+  });
+  sheetSelect.onchange = () => loadSheet(parseInt(sheetSelect.value, 10));
+  loadSheet(0);
+}
+
+function loadSheet(idx){
+  const sh = workbookState.sheets[idx];
+  revokeUrls();
+
+  // تعبئة قائمة الأعمدة القابلة للاستخدام كاسم ملف
+  colSelect.innerHTML = '';
+  const headerEntries = Object.entries(sh.headerRow).sort((a,b) => colLetterToIndex(a[0]) - colLetterToIndex(b[0]));
+  headerEntries.forEach(([letter, name]) => {
+    const opt = document.createElement('option');
+    opt.value = letter;
+    opt.textContent = (name || letter) + ' (' + letter + ')';
+    colSelect.appendChild(opt);
+  });
+  if(headerEntries.length === 0){
+    const opt = document.createElement('option'); opt.value = 'A'; opt.textContent = 'العمود A';
+    colSelect.appendChild(opt);
+  }
+  colSelect.onchange = () => buildItems(sh);
+
+  buildItems(sh);
+}
+
+function buildItems(sh){
+  const namingCol = colSelect.value || colSelect.options[0]?.value || 'A';
+  const usedNames = {};
+  const items = [];
+  const missing = [];
+
+  for(const img of sh.images){
+    const cells = sh.rowData[img.row] || {};
+    let base = sanitizeName(cells[namingCol]);
+    if(!base){
+      missing.push(img.row);
+      base = 'صف_' + img.row;
+    }
+    const count = usedNames[base] || 0;
+    usedNames[base] = count + 1;
+    const finalBase = count === 0 ? base : (base + '_' + (count + 1));
+    const filename = finalBase + '.' + img.ext;
+    const url = URL.createObjectURL(img.blob);
+    currentBlobUrls.push(url);
+    items.push({
+      row: img.row,
+      code: base,
+      cells,
+      filename,
+      previewUrl: url,
+      blob: img.blob,
+      ext: img.ext
+    });
+  }
+  items.sort((a,b) => a.row - b.row);
+  currentSheetData = { items, missing, namingCol };
+
+  summaryEl.innerHTML = `إجمالي الصور: <b>${items.length}</b>` + (missing.length ? ` — <span style="color:var(--err)">${missing.length} صف بدون قيمة في عمود التسمية</span>` : '');
+  warnBox.innerHTML = '';
+  if(missing.length){
+    warnBox.className = 'warn-box';
+    warnBox.textContent = `تنبيه: ${missing.length} صورة تعود لصفوف لا تحتوي على قيمة في العمود المختار للتسمية، وتم تسميتها برقم الصف بدلاً من ذلك.`;
+  }
+
+  renderGrid(items);
+}
+
+function renderGrid(items){
+  const q = searchEl.value.trim().toLowerCase();
+  const filtered = q ? items.filter(it =>
+    it.filename.toLowerCase().includes(q) ||
+    Object.values(it.cells).some(v => String(v).toLowerCase().includes(q))
+  ) : items;
+
+  grid.innerHTML = '';
+  emptyMsg.style.display = filtered.length ? 'none' : 'block';
+  for(const it of filtered){
+    const card = document.createElement('div');
+    card.className = 'card';
+    const secondaryText = Object.entries(it.cells)
+      .filter(([col]) => col !== currentSheetData.namingCol)
+      .map(([,v]) => v).filter(Boolean).slice(0,1)[0] || '';
+    card.innerHTML = `
+      <div class="thumb"></div>
+      <div class="info">
+        <div class="code">${it.filename}</div>
+        <div class="name">${secondaryText}</div>
+      </div>`;
+    const thumb = card.querySelector('.thumb');
+    const imgEl = document.createElement('img');
+    imgEl.src = it.previewUrl;
+    imgEl.loading = 'lazy';
+    imgEl.onerror = () => { thumb.innerHTML = '<div class="noPreview">لا تتوفر معاينة<br>(' + it.ext + ')</div>'; };
+    thumb.appendChild(imgEl);
+    grid.appendChild(card);
+  }
+}
+
+searchEl.addEventListener('input', () => renderGrid(currentSheetData.items));
+
+downloadZipBtn.addEventListener('click', async () => {
+  if(!currentSheetData || currentSheetData.items.length === 0) return;
+  downloadZipBtn.disabled = true;
+  downloadZipBtn.textContent = 'جاري التجهيز...';
+  try{
+    const zip = new JSZip();
+    for(const it of currentSheetData.items){
+      zip.file(it.filename, it.blob);
+    }
+    const blob = await zip.generateAsync({ type: 'blob' }, meta => {
+      downloadZipBtn.textContent = 'جاري الضغط... ' + Math.round(meta.percent) + '%';
+    });
+    triggerDownload(blob, 'الصور_المستخرجة.zip');
+  }catch(err){
+    setStatus('خطأ أثناء إنشاء ZIP: ' + err.message, true);
+  }finally{
+    downloadZipBtn.disabled = false;
+    downloadZipBtn.textContent = 'تنزيل كل الصور (ZIP)';
+  }
+});
+
+downloadCsvBtn.addEventListener('click', () => {
+  if(!currentSheetData) return;
+  const allCols = new Set();
+  currentSheetData.items.forEach(it => Object.keys(it.cells).forEach(c => allCols.add(c)));
+  const cols = Array.from(allCols).sort((a,b) => colLetterToIndex(a) - colLetterToIndex(b));
+  const headerNames = cols.map(c => (workbookState.sheets[parseInt(sheetSelect.value,10)].headerRow[c] || c));
+  let csv = '\uFEFF' + ['رقم الصف', ...headerNames, 'اسم ملف الصورة'].join(',') + '\n';
+  for(const it of currentSheetData.items){
+    const rowVals = cols.map(c => csvEscape(it.cells[c] || ''));
+    csv += [it.row, ...rowVals, it.filename].join(',') + '\n';
+  }
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  triggerDownload(blob, 'جدول_الربط.csv');
+});
+
+function csvEscape(v){
+  v = String(v);
+  if(v.includes(',') || v.includes('"') || v.includes('\n')){
+    return '"' + v.replace(/"/g, '""') + '"';
+  }
+  return v;
+}
+
+function triggerDownload(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function revokeUrls(){
+  currentBlobUrls.forEach(u => URL.revokeObjectURL(u));
+  currentBlobUrls = [];
+}
+</script>
+</body>
+</html>
